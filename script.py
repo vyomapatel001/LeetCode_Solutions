@@ -54,20 +54,30 @@ def fetch_solution_code(submission_id):
         return res.json().get("code")
     return None
 
-def save_solution(title, code, lang):
+def save_solution(title, code, lang, submission_id):
     lang_map = {
         "python3": "py",
+        "pythondata": "py",   # Pandas
+        "mysql": "sql",
+        "bash": "sh",
+        "c": "c",
         "cpp": "cpp",
         "java": "java"
     }
-    ext = lang_map.get(lang, "txt")
+
+    ext = lang_map.get(lang.lower(), "txt")
     safe_title = title.strip().replace(" ", "_").replace("-", "_")
-    filename = f"{safe_title}.{ext}"
-    filepath = os.path.join(GITHUB_REPO_PATH, filename)
-    
+    filename = f"{safe_title}_{submission_id}.{ext}"
+
+    lang_folder = os.path.join(GITHUB_REPO_PATH, ext)
+    os.makedirs(lang_folder, exist_ok=True)
+
+    filepath = os.path.join(lang_folder, filename)
+
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(code)
-    print(f"[+] Saved: {filename}")
+
+    print(f"[+] Saved: {filepath}")
 
 def git_push():
     os.chdir(GITHUB_REPO_PATH)
