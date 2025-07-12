@@ -91,8 +91,16 @@ def push_to_github():
     os.chdir(GITHUB_REPO_PATH)
     subprocess.run(["git", "add", "."])
     subprocess.run(["git", "commit", "-m", GITHUB_COMMIT_MESSAGE])
-    subprocess.run(["git", "push"])
-    print("[✓] Pushed to GitHub.")
+
+    # First try a normal push
+    result = subprocess.run(["git", "push"], capture_output=True, text=True)
+
+    # If push fails due to missing upstream, push with upstream flag
+    if "no upstream branch" in result.stderr:
+        print("[!] No upstream branch found. Setting upstream...")
+        subprocess.run(["git", "push", "--set-upstream", "origin", "automation"])
+    else:
+        print("[✓] Pushed to GitHub.")
 
 
 def main():
