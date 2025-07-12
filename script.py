@@ -1,122 +1,98 @@
 import os
 import requests
 import subprocess
-from datetime import datetime
-from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
-LEETCODE_USERNAME = "https://leetcode.com/u/vyomap_001/"
+# Load env variables
+load_dotenv()
+SESSION = os.getenv("LEETCODE_SESSION")
+CSRF = os.getenv("CSRFTOKEN")
+
+# Local repo path
 GITHUB_REPO_PATH = "/mnt/c/Users/Lenovo/PersonalProjects/LeetCode_Solutions"
 GITHUB_COMMIT_MESSAGE = "Update LeetCode solutions"
-LANGUAGE = "python3"  # or "cpp", "java", etc.
 
-def get_leetcode_solutions(username):
-    print("[*] Fetching problems from LeetCode...")
+# Set up session
+session = requests.Session()
+session.cookies.set("LEETCODE_SESSION", SESSION)
+session.cookies.set("csrftoken", CSRF)
+session.headers.update({
+    "x-csrftoken": CSRF,
+    "referer": "https://leetcode.com",
+    "user-agent": "Mozilla/5.0"
+})
 
-    headers = {
-        "Content-Type": "application/json",
-    }
-
-    query = """
-    query userProfile($username: String!) {
-        allQuestionsCount {
-            difficulty
-            count
-        }
-        matchedUser(username: $username) {
-            submitStats {
-                acSubmissionNum {
-                    difficulty
-                    count
-                    submissions
+def get_accepted_submissions(limit=20):
+    print("[*] Fetching submissions from LeetCode...")
+    url = "https://leetcode.com/graphql"
+    payload = {
+        "operationName": "mySubmissions",
+        "variables": {"offset": 0, "limit": limit},
+        "query": """
+        query mySubmissions($offset: Int!, $limit: Int!) {
+            submissionList(offset: $offset, limit: $limit) {
+                submissions {
+                    id
+                    title
+                    titleSlug
+                    statusDisplay
+                    lang
+                    timestamp
                 }
             }
         }
+        """
     }
-    """
+    r = session.post(url, json=payload)
+    subs = r.json()['data']['submissionList']['submissions']
+    return [s for s in subs if s['statusDisplay'] == "Accepted"]
 
-    url = "https://leetcode.com/graphql"
-    res = requests.post(url, json={"query": query, "variables": {"username": username}}, headers=headers)
-    
-    if res.status_code != 200:
-        print("Failed to fetch data from LeetCode.")
-        return []
+def fetch_solution_code(submission_id):
+    url = f"https://leetcode.com/api/submissions/{submission_id}/"
+    res = session.get(url)
+    if res.status_code == 200:
+        return res.json().get("code")
+    return None
 
-    # Now let's simulate scraping accepted solutions page (since there's no direct API).
-    return scrape_solutions(username)
-
-
-def scrape_solutions(username):
-    print("[*] Scraping accepted solutions...")
-    # This part only works if you're authenticated. Consider using a session cookie for your account.
-    session = requests.Session()
-    base_url = f"https://leetcode.com/vyomap_001/submissions/"
-
-    solutions = []
-
-    page = 1
-    while True:
-        res = session.get(base_url + f"{page}/")
-        soup = BeautifulSoup(res.text, "html.parser")
-
-        rows = soup.find_all("tr", {"class": "ant-table-row"})
-        if not rows:
-            break
-
-        for row in rows:
-            columns = row.find_all("td")
-            if len(columns) < 4 or "Accepted" not in columns[2].text:
-                continue
-
-            problem = columns[1].text.strip()
-            lang = columns[4].text.strip().lower()
-
-            # Save name and language
-            solutions.append((problem, lang))
-        
-        page += 1
-
-    return solutions
-
-
-def save_solution(problem_title, code, lang):
-    filename = problem_title.replace(" ", "_") + "." + lang
+def save_solution(title, code, lang):
+    lang_map = {
+        "python3": "py",
+        "cpp": "cpp",
+        "java": "java"
+    }
+    ext = lang_map.get(lang, "txt")
+    safe_title = title.strip().replace(" ", "_").replace("-", "_")
+    filename = f"{safe_title}.{ext}"
     filepath = os.path.join(GITHUB_REPO_PATH, filename)
-
-    with open(filepath, "w") as f:
+    
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(code)
     print(f"[+] Saved: {filename}")
 
-
-def push_to_github():
+def git_push():
     os.chdir(GITHUB_REPO_PATH)
-    subprocess.run(["git", "add", "."])
-    subprocess.run(["git", "commit", "-m", GITHUB_COMMIT_MESSAGE])
-
-    # First try a normal push
-    result = subprocess.run(["git", "push"], capture_output=True, text=True)
-
-    # If push fails due to missing upstream, push with upstream flag
-    if "no upstream branch" in result.stderr:
-        print("[!] No upstream branch found. Setting upstream...")
-        subprocess.run(["git", "push", "--set-upstream", "origin", "automation"])
+    subprocess.run(["git", "add", "."], check=True)
+    subprocess.run(["git", "commit", "-m", GITHUB_COMMIT_MESSAGE], check=True)
+    
+    push = subprocess.run(["git", "push"], capture_output=True, text=True)
+    
+    if "no upstream branch" in push.stderr:
+        print("[!] No upstream branch. Setting upstream...")
+        subprocess.run(["git", "push", "--set-upstream", "origin", "automation"], check=True)
     else:
         print("[✓] Pushed to GitHub.")
 
-
 def main():
-    solutions = get_leetcode_solutions(LEETCODE_USERNAME)
+    submissions = get_accepted_submissions(limit=10)
+    
+    for sub in submissions:
+        code = fetch_solution_code(sub["id"])
+        if code:
+            save_solution(sub["title"], code, sub["lang"])
+        else:
+            print(f"[!] Skipped {sub['title']} - No code found.")
 
-    for title, lang in solutions:
-        # Skip if not the desired language
-        if LANGUAGE not in lang.lower():
-            continue
-
-        # Here you need to fetch actual solution code (auth required)
-        code = f"# Code for {title}\nprint('Hello World')\n"  # Replace with real code fetch
-        save_solution(title, code, "py")  # adjust extension
-
-    push_to_github()
-
+    git_push()
 
 if __name__ == "__main__":
     main()
